@@ -1,0 +1,30 @@
+name: Build and Verify Stellar Contracts
+on: workflow_dispatch
+
+permissions:
+  id-token: write
+  contents: write
+  attestations: write
+
+jobs:
+  redstone-adapter:
+    uses: stellar-expert/soroban-build-workflow/.github/workflows/release.yml@v22.8.1
+    with:
+      release_name: stellar_${{ github.sha }}
+      release_description: RedStone Stellar Adapter
+      package: redstone-adapter
+      make_target: setup-env
+      relative_path: packages/stellar-connector/deployments/stellarMultiFeed
+    secrets:
+      release_token: ${{ secrets.GITHUB_TOKEN }}
+
+  price-feed:
+    uses: stellar-expert/soroban-build-workflow/.github/workflows/release.yml@v22.8.1
+    with:
+      release_name: stellar_${{ github.sha }}
+      release_description: RedStone Stellar Price Feed
+      package: price-feed
+      make_target: setup-env
+      relative_path: packages/stellar-connector/deployments/stellarMultiFeed
+    secrets:
+      release_token: ${{ secrets.GITHUB_TOKEN }}
