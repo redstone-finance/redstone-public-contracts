@@ -13,7 +13,6 @@ jobs:
       release_name: stellar_${{ github.sha }}
       release_description: RedStone Stellar Adapter
       package: redstone-adapter
-      make_target: setup-env
       relative_path: packages/stellar-connector/deployments/stellarMultiFeed
     secrets:
       release_token: ${{ secrets.GITHUB_TOKEN }}
