@@ -23,7 +23,6 @@ jobs:
       release_name: stellar_${{ github.sha }}
       release_description: RedStone Stellar Price Feed
       package: price-feed
-      make_target: setup-env
       relative_path: packages/stellar-connector/deployments/stellarMultiFeed
     secrets:
       release_token: ${{ secrets.GITHUB_TOKEN }}
