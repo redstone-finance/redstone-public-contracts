@@ -26,3 +26,13 @@ jobs:
       relative_path: packages/stellar-connector/deployments/stellarMultiFeed
     secrets:
       release_token: ${{ secrets.GITHUB_TOKEN }}
+
+  sep-40:
+    uses: stellar-expert/soroban-build-workflow/.github/workflows/release.yml@v22.8.1
+    with:
+      release_name: stellar_${{ github.sha }}
+      release_description: RedStone Stellar Price Feed
+      package: redstone-sep-40
+      relative_path: packages/stellar-connector/deployments/stellarMultiFeed
+    secrets:
+      release_token: ${{ secrets.GITHUB_TOKEN }}
