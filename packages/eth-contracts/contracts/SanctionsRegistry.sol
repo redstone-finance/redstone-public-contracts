@@ -3,10 +3,11 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "./ISanctionsRegistry.sol";
 
 /// @title On-Chain Sanctions List
 /// @dev Inspired by and continuing the Chainalysis sanctions oracle at 0x40C57923924B5c5c5455c48D93317139ADDaC8fb.
-contract SanctionsRegistry is Initializable {
+abstract contract SanctionsRegistry is Initializable, ISanctionsRegistry {
   bytes32 private constant SANCTIONS_REGISTRY_STORAGE_LOCATION =
     0xab36462e12e911bd16bf7ca83c9da382ecf08907e54efd6ecb0dd5a94066ba25; // keccak256("RedStone.SanctionsRegistry.storage")
 
@@ -24,7 +25,7 @@ contract SanctionsRegistry is Initializable {
 
   function initialize() public initializer {}
 
-  function setAsSanctioned(address[] memory newSanctions) public onlyAdmin {
+  function setAsSanctioned(address[] calldata newSanctions) public onlyAdmin {
     SanctionsRegistryStorage storage $ = _getSanctionsRegistryStorage();
     for (uint256 i = 0; i < newSanctions.length; i++) {
       $.sanctionedAddresses[newSanctions[i]] = true;
@@ -33,7 +34,7 @@ contract SanctionsRegistry is Initializable {
     emit AddressesSetAsSanctioned(newSanctions);
   }
 
-  function unsetAsSanctioned(address[] memory removeSanctions) public onlyAdmin {
+  function unsetAsSanctioned(address[] calldata removeSanctions) public onlyAdmin {
     SanctionsRegistryStorage storage $ = _getSanctionsRegistryStorage();
     for (uint256 i = 0; i < removeSanctions.length; i++) {
       $.sanctionedAddresses[removeSanctions[i]] = false;
@@ -46,7 +47,7 @@ contract SanctionsRegistry is Initializable {
     return _getSanctionsRegistryStorage().sanctionedAddresses[addr];
   }
 
-  function areSanctioned(address[] memory addrs) public view returns (bool[] memory result) {
+  function areSanctioned(address[] calldata addrs) public view returns (bool[] memory result) {
     SanctionsRegistryStorage storage $ = _getSanctionsRegistryStorage();
     result = new bool[](addrs.length);
     for (uint256 i = 0; i < addrs.length; i++) {
@@ -67,10 +68,7 @@ contract SanctionsRegistry is Initializable {
   }
 
   /// @dev We don't store admin in storage. To change the admin the contract should be upgraded
-  function isAdmin(address addr) public view virtual returns (bool) {
-    addr;
-    return false;
-  }
+  function isAdmin(address addr) public view virtual returns (bool);
 
   function description() external pure returns (string memory) {
     return "On-chain sanctions list, synced with OFAC and opensanctions.org data. Provided best-effort, \"AS IS\", with no warranty.";
