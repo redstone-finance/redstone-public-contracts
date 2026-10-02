@@ -105,6 +105,7 @@ contract STAR is Initializable, UUPSUpgradeable, EIP712Upgradeable, Ownable2Step
     error NoRenounce();
     error NotStar();
     error Sanctioned(address account);
+    error SellerNotDebited();
     constructor() {
         _disableInitializers();
     }
@@ -187,7 +188,32 @@ contract STAR is Initializable, UUPSUpgradeable, EIP712Upgradeable, Ownable2Step
         )));
     }
     function settle(SignedOrder calldata s, SignedAssignment calldata m, Execution calldata x)
-        external nonReentrant whenNotPaused returns (uint256 buyPaid) {
+        external nonReentrant whenNotPaused returns (uint256) {
+        Order calldata o = s.order;
+        Assignment calldata a = m.assignment;
+        (bytes32 orderId, bytes32 assignmentId) = _validate(s, m);
+        address sellTo = x.sellRecipient == address(0) ? msg.sender : x.sellRecipient;
+        if (sellTo == o.seller) revert SellRecipientIsSeller();
+        IERC20(o.sellToken).safeTransferFrom(o.seller, sellTo, a.sellSlice);
+        (uint256 buyPaid, uint256 feePaid) = _callSolver(o, a, orderId, sellTo, x.callbackData);
+        if (buyPaid + feePaid > a.buySlice + a.feeSlice + OVERPAY_SLACK) revert Overpaid();
+        _emitSettled(o, a, orderId, assignmentId, sellTo, buyPaid, feePaid);
+        return buyPaid;
+    }
+    function settleFromSeller(SignedOrder calldata s, SignedAssignment calldata m, bytes calldata callbackData)
+        external nonReentrant whenNotPaused returns (uint256) {
+        Order calldata o = s.order;
+        Assignment calldata a = m.assignment;
+        (bytes32 orderId, bytes32 assignmentId) = _validate(s, m);
+        uint256 sellerBefore = IERC20(o.sellToken).balanceOf(o.seller);
+        (uint256 buyPaid, uint256 feePaid) = _callSolver(o, a, orderId, address(0), callbackData);
+        if (IERC20(o.sellToken).balanceOf(o.seller) + a.sellSlice != sellerBefore) revert SellerNotDebited();
+        if (buyPaid + feePaid > a.buySlice + a.feeSlice + OVERPAY_SLACK) revert Overpaid();
+        _emitSettled(o, a, orderId, assignmentId, address(0), buyPaid, feePaid);
+        return buyPaid;
+    }
+    function _validate(SignedOrder calldata s, SignedAssignment calldata m)
+        private returns (bytes32 orderId, bytes32 assignmentId) {
         Order calldata o = s.order;
         Assignment calldata a = m.assignment;
         STARStorageData storage $ = _getStorage();
@@ -205,14 +231,14 @@ contract STAR is Initializable, UUPSUpgradeable, EIP712Upgradeable, Ownable2Step
         if (block.timestamp > o.validTo) revert OrderExpired();
         if (block.timestamp > a.deadline) revert AssignmentExpired();
         if (a.sellSlice == 0) revert ZeroSlice();
-        bytes32 orderId = hashOrder(o);
+        orderId = hashOrder(o);
         if ($.cancelled[orderId]) revert OrderCancelled();
         if (!SignatureChecker.isValidSignatureNow(o.seller, orderId, s.signature)) revert BadSellerSignature();
         if (o.solverSet != bytes32(0)) {
             if (hashSolverSet(s.allowedSolvers) != o.solverSet) revert BadSolverSet();
             if (!_isAllowed(s.allowedSolvers, msg.sender)) revert SolverNotAllowed();
         }
-        bytes32 assignmentId = hashAssignment(orderId, msg.sender, a);
+        assignmentId = hashAssignment(orderId, msg.sender, a);
         if ($.assignmentUsed[assignmentId]) revert AssignmentAlreadyUsed();
         if (!SignatureChecker.isValidSignatureNow(o.matcher, assignmentId, m.signature)) {
             revert BadAssignmentSignature();
@@ -222,9 +248,10 @@ contract STAR is Initializable, UUPSUpgradeable, EIP712Upgradeable, Ownable2Step
         if (a.feeSlice * o.sellAmount < o.feeAmount * a.sellSlice) revert FeeShort();
         $.assignmentUsed[assignmentId] = true;
         $.filled[orderId] += a.sellSlice;
-        address sellTo = x.sellRecipient == address(0) ? msg.sender : x.sellRecipient;
-        if (sellTo == o.seller) revert SellRecipientIsSeller();
-        IERC20(o.sellToken).safeTransferFrom(o.seller, sellTo, a.sellSlice);
+    }
+    function _callSolver(Order calldata o, Assignment calldata a, bytes32 orderId, address sellTo,
+        bytes calldata callbackData) private returns (uint256 buyPaid, uint256 feePaid) {
+        address collector = _getStorage().feeCollector;
         uint256 receiverBefore = IERC20(o.buyToken).balanceOf(o.receiver);
         uint256 collectorBefore = IERC20(o.buyToken).balanceOf(collector);
         ISolverCallback(msg.sender).onSettle(
@@ -232,17 +259,19 @@ contract STAR is Initializable, UUPSUpgradeable, EIP712Upgradeable, Ownable2Step
                 orderId: orderId, sellToken: o.sellToken, sellSlice: a.sellSlice, sellRecipient: sellTo,
                 buyToken: o.buyToken, buySlice: a.buySlice, receiver: o.receiver, feeSlice: a.feeSlice,
                 feeCollector: collector
-            }), x.callbackData
+            }), callbackData
         );
         uint256 receiverAfter = IERC20(o.buyToken).balanceOf(o.receiver);
         uint256 collectorAfter = IERC20(o.buyToken).balanceOf(collector);
         if (receiverAfter < receiverBefore) revert Underpaid();
         if (collectorAfter < collectorBefore) revert FeeUnpaid();
         buyPaid = receiverAfter - receiverBefore;
-        uint256 feePaid = collectorAfter - collectorBefore;
+        feePaid = collectorAfter - collectorBefore;
         if (buyPaid < a.buySlice) revert Underpaid();
         if (feePaid < a.feeSlice) revert FeeUnpaid();
-        if (buyPaid + feePaid > a.buySlice + a.feeSlice + OVERPAY_SLACK) revert Overpaid();
+    }
+    function _emitSettled(Order calldata o, Assignment calldata a, bytes32 orderId, bytes32 assignmentId,
+        address sellTo, uint256 buyPaid, uint256 feePaid) private {
         emit Settled(
             o.sellToken, o.buyToken, o.seller, orderId, assignmentId, msg.sender, o.matcher,
             o.receiver, sellTo, a.sellSlice, buyPaid, feePaid
