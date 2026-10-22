@@ -8,9 +8,11 @@ import {Authorization, IMorpho, MarketParams, Signature} from "../morpho/IMorpho
 contract StarMorphoUnwinder is ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
     error NotMorpho();
+    error NotBorrower();
     error ReceiverNotSelf();
     error WrongTokens();
     error SlicesNotCollateral();
+    error CollateralNotSold();
     error NotRevoked();
     IMorpho public immutable morpho;
     event Unwound(
@@ -30,6 +32,7 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
         Signature calldata revokeSig
     ) external nonReentrant {
         address borrower = s.order.seller;
+        if (msg.sender != borrower) revert NotBorrower();
         if (s.order.receiver != address(this)) revert ReceiverNotSelf();
         if (s.order.sellToken != mp.collateralToken || s.order.buyToken != mp.loanToken) revert WrongTokens();
         if (!morpho.isAuthorized(borrower, address(this))) morpho.setAuthorizationWithSig(grant, grantSig);
@@ -41,12 +44,15 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
         }
         if (total != collateral) revert SlicesNotCollateral();
         bytes memory data = abi.encode(mp, s, slices, uint256(collateral));
+        IERC20 coll = IERC20(mp.collateralToken);
+        uint256 collBefore = coll.balanceOf(borrower);
         uint256 repaid;
         if (borrowShares > 0) {
             (repaid,) = morpho.repay(mp, 0, borrowShares, borrower, data);
         } else {
             _release(mp, s, slices, collateral);
         }
+        if (coll.balanceOf(borrower) != collBefore) revert CollateralNotSold();
         IERC20 loan = IERC20(mp.loanToken);
         uint256 proceeds = loan.balanceOf(address(this));
         loan.safeTransfer(borrower, proceeds);
