@@ -11,15 +11,18 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
     error NotBorrower();
     error ReceiverNotSelf();
     error WrongTokens();
+    error WrongMatcher();
     error SlicesNotCollateral();
     error CollateralNotSold();
     error NotRevoked();
     IMorpho public immutable morpho;
+    address public immutable matcher;
     event Unwound(
         bytes32 indexed marketId, address indexed borrower, uint256 collateral, uint256 repaid, uint256 proceeds
     );
-    constructor(IMorpho _morpho) {
+    constructor(IMorpho _morpho, address _matcher) {
         morpho = _morpho;
+        matcher = _matcher;
     }
 
     function unwind(
@@ -34,6 +37,7 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
         address borrower = s.order.seller;
         if (msg.sender != borrower) revert NotBorrower();
         if (s.order.receiver != address(this)) revert ReceiverNotSelf();
+        if (s.order.matcher != matcher) revert WrongMatcher();
         if (s.order.sellToken != mp.collateralToken || s.order.buyToken != mp.loanToken) revert WrongTokens();
         if (!morpho.isAuthorized(borrower, address(this))) morpho.setAuthorizationWithSig(grant, grantSig);
         bytes32 marketId = keccak256(abi.encode(mp));
