@@ -121,8 +121,7 @@ contract LiquidLaneSolver is Initializable, UUPSUpgradeable, Ownable2StepUpgrade
         }));
         uint256 received = stable.balanceOf(address(this)) - before;
         if (received < owed) revert VenuePaidShort(received, owed);
-        stable.safeTransfer(ctx.receiver, ctx.buySlice);
-        stable.safeTransfer(ctx.feeCollector, ctx.feeSlice);
+        stable.forceApprove($.settlement, owed);
         emit Filled(ctx.orderId, adapter, ctx.sellToken, ctx.sellSlice, received, received - owed);
     }
     function setOperator(address operator, bool allowed) external onlyOwner {

@@ -70,7 +70,6 @@ contract STAR is Initializable, UUPSUpgradeable, EIP712Upgradeable, Ownable2Step
         "Assignment(bytes32 orderId,address solver,uint256 sellSlice,uint256 buySlice,uint256 feeSlice,uint32 deadline)"
     );
     bytes32 public constant KIND_SELL = keccak256("sell");
-    uint256 public constant OVERPAY_SLACK = 16;
     event Settled(
         address indexed sellToken, address indexed buyToken, address indexed seller, bytes32 orderId,
         bytes32 assignmentId, address solver, address matcher, address receiver, address sellRecipient,
@@ -96,7 +95,6 @@ contract STAR is Initializable, UUPSUpgradeable, EIP712Upgradeable, Ownable2Step
     error FeeShort();
     error Underpaid();
     error FeeUnpaid();
-    error Overpaid();
     error NotSeller();
     error BadSolverSet();
     error SolverNotAllowed();
@@ -157,7 +155,7 @@ contract STAR is Initializable, UUPSUpgradeable, EIP712Upgradeable, Ownable2Step
     }
     function _authorizeUpgrade(address newImplementation) internal view override onlyOwner {
         STAR newImpl = STAR(newImplementation);
-        if (newImpl.KIND_SELL() != KIND_SELL || newImpl.OVERPAY_SLACK() != OVERPAY_SLACK) revert NotStar();
+        if (newImpl.KIND_SELL() != KIND_SELL) revert NotStar();
     }
     function _getStorage() private pure returns (STARStorageData storage) {
         return STARStorageV1.load();
@@ -196,7 +194,6 @@ contract STAR is Initializable, UUPSUpgradeable, EIP712Upgradeable, Ownable2Step
         if (sellTo == o.seller) revert SellRecipientIsSeller();
         IERC20(o.sellToken).safeTransferFrom(o.seller, sellTo, a.sellSlice);
         (uint256 buyPaid, uint256 feePaid) = _callSolver(o, a, orderId, sellTo, x.callbackData);
-        if (buyPaid + feePaid > a.buySlice + a.feeSlice + OVERPAY_SLACK) revert Overpaid();
         _emitSettled(o, a, orderId, assignmentId, sellTo, buyPaid, feePaid);
         return buyPaid;
     }
@@ -208,7 +205,6 @@ contract STAR is Initializable, UUPSUpgradeable, EIP712Upgradeable, Ownable2Step
         uint256 sellerBefore = IERC20(o.sellToken).balanceOf(o.seller);
         (uint256 buyPaid, uint256 feePaid) = _callSolver(o, a, orderId, address(0), callbackData);
         if (IERC20(o.sellToken).balanceOf(o.seller) + a.sellSlice != sellerBefore) revert SellerNotDebited();
-        if (buyPaid + feePaid > a.buySlice + a.feeSlice + OVERPAY_SLACK) revert Overpaid();
         _emitSettled(o, a, orderId, assignmentId, address(0), buyPaid, feePaid);
         return buyPaid;
     }
@@ -252,8 +248,6 @@ contract STAR is Initializable, UUPSUpgradeable, EIP712Upgradeable, Ownable2Step
     function _callSolver(Order calldata o, Assignment calldata a, bytes32 orderId, address sellTo,
         bytes calldata callbackData) private returns (uint256 buyPaid, uint256 feePaid) {
         address collector = _getStorage().feeCollector;
-        uint256 receiverBefore = IERC20(o.buyToken).balanceOf(o.receiver);
-        uint256 collectorBefore = IERC20(o.buyToken).balanceOf(collector);
         ISolverCallback(msg.sender).onSettle(
             ISolverCallback.SettleContext({
                 orderId: orderId, sellToken: o.sellToken, sellSlice: a.sellSlice, sellRecipient: sellTo,
@@ -261,14 +255,18 @@ contract STAR is Initializable, UUPSUpgradeable, EIP712Upgradeable, Ownable2Step
                 feeCollector: collector
             }), callbackData
         );
-        uint256 receiverAfter = IERC20(o.buyToken).balanceOf(o.receiver);
-        uint256 collectorAfter = IERC20(o.buyToken).balanceOf(collector);
-        if (receiverAfter < receiverBefore) revert Underpaid();
-        if (collectorAfter < collectorBefore) revert FeeUnpaid();
-        buyPaid = receiverAfter - receiverBefore;
-        feePaid = collectorAfter - collectorBefore;
+        IERC20 buy = IERC20(o.buyToken);
+        buyPaid = _pull(buy, o.receiver, a.buySlice);
         if (buyPaid < a.buySlice) revert Underpaid();
+        feePaid = _pull(buy, collector, a.feeSlice);
         if (feePaid < a.feeSlice) revert FeeUnpaid();
+    }
+    function _pull(IERC20 token, address to, uint256 amount) private returns (uint256) {
+        if (amount == 0) return 0;
+        uint256 before = token.balanceOf(to);
+        token.safeTransferFrom(msg.sender, to, amount);
+        uint256 afterBalance = token.balanceOf(to);
+        return afterBalance > before ? afterBalance - before : 0;
     }
     function _emitSettled(Order calldata o, Assignment calldata a, bytes32 orderId, bytes32 assignmentId,
         address sellTo, uint256 buyPaid, uint256 feePaid) private {

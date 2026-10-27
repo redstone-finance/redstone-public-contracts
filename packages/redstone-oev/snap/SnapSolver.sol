@@ -53,8 +53,7 @@ contract SnapSolver is Ownable2Step, Pausable, ISolverCallbackAbi {
         snap.sell(ctx.sellToken, ctx.sellSlice, owed);
         uint256 received = stable.balanceOf(address(this)) - before;
         if (received < owed) revert VenuePaidShort(received, owed);
-        stable.safeTransfer(ctx.receiver, ctx.buySlice);
-        if (ctx.feeSlice > 0) stable.safeTransfer(ctx.feeCollector, ctx.feeSlice);
+        stable.forceApprove(address(settlement), owed);
         emit Filled(ctx.orderId, ctx.sellToken, ctx.sellSlice, received, received - owed);
     }
     function setOperator(address operator, bool allowed) external onlyOwner {
