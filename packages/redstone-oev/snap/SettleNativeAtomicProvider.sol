@@ -50,6 +50,7 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
     event PauserSet(address indexed pauser);
     event Paused(address indexed account);
     event Unpaused(address indexed account);
+    event DepegCheckDisabledSet(bool disabled);
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(IERC4626 _vault) {
         vault = _vault;
@@ -76,13 +77,17 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
     function morphoAdapterFactory() external view returns (address) {
         return _getStorage().morphoAdapterFactory;
     }
+    function depegCheckDisabled() external view returns (bool) {
+        return _getStorage().depegCheckDisabled;
+    }
     function stableFeed() external view returns (address feed, uint16 maxDeviationBps, uint32 maxAge) {
         SettleNativeAtomicProviderStorageData storage $ = _getStorage();
         return ($.stableFeed, $.stableMaxDeviationBps, $.stableMaxAge);
     }
     function stablePriceInRange() public view returns (bool) {
         SettleNativeAtomicProviderStorageData storage $ = _getStorage();
-        if ($.stableFeed == address(0)) return true;
+        if ($.depegCheckDisabled) return true;
+        if ($.stableFeed == address(0)) return false;
         (bool hasPrice, uint256 price) = _readPrice($.stableFeed, $.stableMaxAge);
         if (!hasPrice) return false;
         (bool hasScale, uint256 par) = _readScale($.stableFeed);
@@ -187,6 +192,10 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
         $.stableMaxDeviationBps = maxDeviationBps;
         $.stableMaxAge = maxAge;
         emit StableFeedSet(feed, maxDeviationBps, maxAge);
+    }
+    function setDepegCheckDisabled(bool disabled) external onlyOwner {
+        _getStorage().depegCheckDisabled = disabled;
+        emit DepegCheckDisabledSet(disabled);
     }
     function setMorphoAdapterFactory(address factory) external onlyOwner {
         if (factory != address(0)) {
