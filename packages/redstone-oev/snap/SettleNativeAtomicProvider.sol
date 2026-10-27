@@ -45,6 +45,11 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
     event VaultFunded(uint256 stableAmount);
     event ExposureReduced(address indexed rwa, uint256 rwaRedeemed);
     event Withdrawn(address indexed token, address indexed to, uint256 amount);
+    event StableFeedSet(address indexed feed, uint16 maxDeviationBps, uint32 maxAge);
+    event MorphoAdapterFactorySet(address indexed factory);
+    event PauserSet(address indexed pauser);
+    event Paused(address indexed account);
+    event Unpaused(address indexed account);
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(IERC4626 _vault) {
         vault = _vault;
@@ -181,6 +186,7 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
         $.stableFeed = feed;
         $.stableMaxDeviationBps = maxDeviationBps;
         $.stableMaxAge = maxAge;
+        emit StableFeedSet(feed, maxDeviationBps, maxAge);
     }
     function setMorphoAdapterFactory(address factory) external onlyOwner {
         if (factory != address(0)) {
@@ -191,17 +197,21 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
             require(IMorphoAdapterFactory(factory).morphoMarketV1AdapterV2(address(vault)) != address(0), "NO_ADAPTER");
         }
         _getStorage().morphoAdapterFactory = factory;
+        emit MorphoAdapterFactorySet(factory);
     }
     function setPauser(address account) external onlyOwner {
         _getStorage().pauser = account;
+        emit PauserSet(account);
     }
     function pause() external {
         SettleNativeAtomicProviderStorageData storage $ = _getStorage();
         require(msg.sender == $.pauser || msg.sender == owner(), "NOT_PAUSER");
         $.paused = true;
+        emit Paused(msg.sender);
     }
     function unpause() external onlyOwner {
         _getStorage().paused = false;
+        emit Unpaused(msg.sender);
     }
     function fundVault(uint256 stableAmount) external onlyOwner {
         _fundVault(stableAmount);
