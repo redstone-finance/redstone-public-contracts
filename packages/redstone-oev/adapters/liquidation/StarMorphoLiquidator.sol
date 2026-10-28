@@ -21,6 +21,7 @@ contract StarMorphoLiquidator is IERC1271 {
     error WrongMatcher();
     error WrongTokens();
     error NotSelf();
+    error SolverFillFailed(address solver, bytes reason);
     bytes32 private constant SIGNS = keccak256("StarMorphoLiquidator.signs");
     IMorpho public immutable morpho;
     ISTAR public immutable star;
@@ -77,7 +78,10 @@ contract StarMorphoLiquidator is IERC1271 {
         _signs(orderHash).asBoolean().tstore(true);
         _grant(coll, approvals, true);
         for (uint256 i; i < slices.length; ++i) {
-            IFillSolver(slices[i].solver).fill(s, slices[i].assignment, slices[i].execution);
+            try IFillSolver(slices[i].solver).fill(s, slices[i].assignment, slices[i].execution) {}
+            catch (bytes memory reason) {
+                revert SolverFillFailed(slices[i].solver, reason);
+            }
         }
         _grant(coll, approvals, false);
         _signs(orderHash).asBoolean().tstore(false);
