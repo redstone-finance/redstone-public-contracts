@@ -22,6 +22,7 @@ contract StarMorphoLiquidator is IERC1271 {
     error WrongTokens();
     error NotSelf();
     error SolverFillFailed(address solver, bytes reason);
+    error SlicesNotPaid();
     bytes32 private constant SIGNS = keccak256("StarMorphoLiquidator.signs");
     IMorpho public immutable morpho;
     ISTAR public immutable star;
@@ -77,16 +78,21 @@ contract StarMorphoLiquidator is IERC1271 {
         bytes32 orderHash = star.hashOrder(s.order);
         _signs(orderHash).asBoolean().tstore(true);
         _grant(coll, approvals, true);
+        IERC20 loan = IERC20(s.order.buyToken);
+        uint256 loanBefore = loan.balanceOf(address(this));
+        uint256 owed;
         for (uint256 i; i < slices.length; ++i) {
+            owed += slices[i].assignment.assignment.buySlice;
             try IFillSolver(slices[i].solver).fill(s, slices[i].assignment, slices[i].execution) {}
             catch (bytes memory reason) {
                 revert SolverFillFailed(slices[i].solver, reason);
             }
         }
+        if (loan.balanceOf(address(this)) < loanBefore + owed) revert SlicesNotPaid();
         _grant(coll, approvals, false);
         _signs(orderHash).asBoolean().tstore(false);
         coll.forceApprove(address(star), 0);
-        IERC20(s.order.buyToken).forceApprove(address(morpho), repaidAssets);
+        loan.forceApprove(address(morpho), repaidAssets);
     }
 
     function isValidSignature(bytes32 hash, bytes calldata) external view returns (bytes4) {

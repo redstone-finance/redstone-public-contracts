@@ -16,6 +16,7 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
     error CollateralNotSold();
     error NotRevoked();
     error SolverFillFailed(address solver, bytes reason);
+    error SlicesNotPaid();
     IMorpho public immutable morpho;
     address public immutable matcher;
     event Unwound(
@@ -79,11 +80,16 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
         private
     {
         morpho.withdrawCollateral(mp, collateral, s.order.seller, s.order.seller);
+        IERC20 loan = IERC20(mp.loanToken);
+        uint256 loanBefore = loan.balanceOf(address(this));
+        uint256 owed;
         for (uint256 i; i < slices.length; ++i) {
+            owed += slices[i].assignment.assignment.buySlice;
             try IFillSolver(slices[i].solver).fill(s, slices[i].assignment, slices[i].execution) {}
             catch (bytes memory reason) {
                 revert SolverFillFailed(slices[i].solver, reason);
             }
         }
+        if (loan.balanceOf(address(this)) < loanBefore + owed) revert SlicesNotPaid();
     }
 }
