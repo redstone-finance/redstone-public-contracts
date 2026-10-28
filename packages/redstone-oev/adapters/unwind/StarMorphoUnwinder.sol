@@ -50,6 +50,8 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
         bytes memory data = abi.encode(mp, s, slices, uint256(collateral));
         IERC20 coll = IERC20(mp.collateralToken);
         uint256 collBefore = coll.balanceOf(borrower);
+        IERC20 loan = IERC20(mp.loanToken);
+        uint256 loanBefore = loan.balanceOf(address(this));
         uint256 repaid;
         if (borrowShares > 0) {
             (repaid,) = morpho.repay(mp, 0, borrowShares, borrower, data);
@@ -57,8 +59,7 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
             _release(mp, s, slices, collateral);
         }
         if (coll.balanceOf(borrower) != collBefore) revert CollateralNotSold();
-        IERC20 loan = IERC20(mp.loanToken);
-        uint256 proceeds = loan.balanceOf(address(this));
+        uint256 proceeds = loan.balanceOf(address(this)) - loanBefore;
         loan.safeTransfer(borrower, proceeds);
         morpho.setAuthorizationWithSig(revoke, revokeSig);
         if (morpho.isAuthorized(borrower, address(this))) revert NotRevoked();
