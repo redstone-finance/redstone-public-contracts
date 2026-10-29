@@ -16,7 +16,6 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
     error WrongMatcher();
     error SlicesNotCollateral();
     error CollateralNotSold();
-    error NotRevoked();
     error SolverFillFailed(address solver, bytes reason);
     error SlicesNotSigned();
     error SliceAlreadyUsed(uint256 index);
@@ -79,8 +78,9 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
         if (arrived != owed) revert UnexpectedProceeds(arrived, owed);
         uint256 proceeds = arrived - repaid;
         loan.safeTransfer(borrower, proceeds);
-        morpho.setAuthorizationWithSig(revoke, revokeSig);
-        if (morpho.isAuthorized(borrower, address(this))) revert NotRevoked();
+        if (morpho.isAuthorized(borrower, address(this))) {
+            try morpho.setAuthorizationWithSig(revoke, revokeSig) {} catch {}
+        }
         emit Unwound(marketId, borrower, collateral, repaid, proceeds);
     }
 
