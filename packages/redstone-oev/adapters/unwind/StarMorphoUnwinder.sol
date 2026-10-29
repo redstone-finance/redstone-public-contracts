@@ -2,6 +2,8 @@
 pragma solidity 0.8.24;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {FillSlice, IFillSolver, ISTAR} from "../fill/IFillSolver.sol";
 import {Authorization, IMorpho, MarketParams, Signature} from "../morpho/IMorpho.sol";
@@ -17,6 +19,7 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
     error NotRevoked();
     error SolverFillFailed(address solver, bytes reason);
     error SlicesNotPaid();
+    error SlicesNotSigned();
     IMorpho public immutable morpho;
     address public immutable matcher;
     event Unwound(
@@ -34,13 +37,18 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
         Authorization calldata grant,
         Signature calldata grantSig,
         Authorization calldata revoke,
-        Signature calldata revokeSig
+        Signature calldata revokeSig,
+        bytes calldata slicesSig
     ) external nonReentrant {
         address borrower = s.order.seller;
         if (msg.sender != borrower) revert NotBorrower();
         if (s.order.receiver != address(this)) revert ReceiverNotSelf();
         if (s.order.matcher != matcher) revert WrongMatcher();
         if (s.order.sellToken != mp.collateralToken || s.order.buyToken != mp.loanToken) revert WrongTokens();
+        bytes32 digest = keccak256(abi.encode(block.chainid, address(this), s, slices));
+        if (!SignatureChecker.isValidSignatureNow(matcher, MessageHashUtils.toEthSignedMessageHash(digest), slicesSig)) {
+            revert SlicesNotSigned();
+        }
         if (!morpho.isAuthorized(borrower, address(this))) morpho.setAuthorizationWithSig(grant, grantSig);
         bytes32 marketId = keccak256(abi.encode(mp));
         (, uint128 borrowShares, uint128 collateral) = morpho.position(marketId, borrower);
