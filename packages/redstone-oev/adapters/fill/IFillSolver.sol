@@ -60,6 +60,8 @@ interface ISTAR {
         external
         returns (uint256 buyPaid);
     function hashOrder(Order calldata o) external view returns (bytes32);
+    function hashAssignment(bytes32 orderId, address solver, Assignment calldata a) external view returns (bytes32);
+    function assignmentUsed(bytes32 assignmentId) external view returns (bool);
     function filled(bytes32 orderId) external view returns (uint256);
 }
 

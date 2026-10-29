@@ -18,15 +18,19 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
     error CollateralNotSold();
     error NotRevoked();
     error SolverFillFailed(address solver, bytes reason);
-    error SlicesNotPaid();
     error SlicesNotSigned();
+    error SliceAlreadyUsed(uint256 index);
+    error SliceNotSettled(uint256 index);
+    error UnexpectedProceeds(uint256 arrived, uint256 owed);
     IMorpho public immutable morpho;
+    ISTAR public immutable star;
     address public immutable matcher;
     event Unwound(
         bytes32 indexed marketId, address indexed borrower, uint256 collateral, uint256 repaid, uint256 proceeds
     );
-    constructor(IMorpho _morpho, address _matcher) {
+    constructor(IMorpho _morpho, ISTAR _star, address _matcher) {
         morpho = _morpho;
+        star = _star;
         matcher = _matcher;
     }
 
@@ -53,8 +57,10 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
         bytes32 marketId = keccak256(abi.encode(mp));
         (, uint128 borrowShares, uint128 collateral) = morpho.position(marketId, borrower);
         uint256 total;
+        uint256 owed;
         for (uint256 i; i < slices.length; ++i) {
             total += slices[i].assignment.assignment.sellSlice;
+            owed += slices[i].assignment.assignment.buySlice;
         }
         if (total != collateral) revert SlicesNotCollateral();
         bytes memory data = abi.encode(mp, s, slices, uint256(collateral));
@@ -69,7 +75,9 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
             _release(mp, s, slices, collateral);
         }
         if (coll.balanceOf(borrower) != collBefore) revert CollateralNotSold();
-        uint256 proceeds = loan.balanceOf(address(this)) - loanBefore;
+        uint256 arrived = loan.balanceOf(address(this)) + repaid - loanBefore;
+        if (arrived != owed) revert UnexpectedProceeds(arrived, owed);
+        uint256 proceeds = arrived - repaid;
         loan.safeTransfer(borrower, proceeds);
         morpho.setAuthorizationWithSig(revoke, revokeSig);
         if (morpho.isAuthorized(borrower, address(this))) revert NotRevoked();
@@ -88,16 +96,15 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
         private
     {
         morpho.withdrawCollateral(mp, collateral, s.order.seller, s.order.seller);
-        IERC20 loan = IERC20(mp.loanToken);
-        uint256 loanBefore = loan.balanceOf(address(this));
-        uint256 owed;
+        bytes32 orderId = star.hashOrder(s.order);
         for (uint256 i; i < slices.length; ++i) {
-            owed += slices[i].assignment.assignment.buySlice;
+            bytes32 id = star.hashAssignment(orderId, slices[i].solver, slices[i].assignment.assignment);
+            if (star.assignmentUsed(id)) revert SliceAlreadyUsed(i);
             try IFillSolver(slices[i].solver).fill(s, slices[i].assignment, slices[i].execution) {}
             catch (bytes memory reason) {
                 revert SolverFillFailed(slices[i].solver, reason);
             }
+            if (!star.assignmentUsed(id)) revert SliceNotSettled(i);
         }
-        if (loan.balanceOf(address(this)) < loanBefore + owed) revert SlicesNotPaid();
     }
 }
