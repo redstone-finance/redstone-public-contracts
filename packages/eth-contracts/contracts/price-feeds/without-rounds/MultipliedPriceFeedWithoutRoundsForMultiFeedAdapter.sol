@@ -11,6 +11,9 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 /// @dev Decimals are hardcoded to 8 because all RedStone price feeds use 8 decimals and it is the default decimals() value
 /// inherited from PriceFeedBase. Reading them dynamically would increase gas cost.
 
+/// @dev updatedAt is the newer of the two timestamps, so the other feed may be older than it suggests. Consumers that need
+/// stricter staleness guarantees should check the staleness of both underlying feeds separately.
+
 abstract contract MultipliedPriceFeedWithoutRoundsForMultiFeedAdapter is PriceFeedWithoutRoundsForMultiFeedAdapter {
   function getFirstDataFeedId() public view virtual returns (bytes32);
   function getSecondDataFeedId() public view virtual returns (bytes32);
