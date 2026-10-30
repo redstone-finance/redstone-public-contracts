@@ -7,6 +7,10 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @notice Reports first * second / 1e8 (all 8 decimals) with the newer of the two timestamps.
+
+/// @dev Decimals are hardcoded to 8 because all RedStone price feeds use 8 decimals and it is the default decimals() value
+/// inherited from PriceFeedBase. Reading them dynamically would increase gas cost.
+
 abstract contract MultipliedPriceFeedWithoutRoundsForMultiFeedAdapter is PriceFeedWithoutRoundsForMultiFeedAdapter {
   function getFirstDataFeedId() public view virtual returns (bytes32);
   function getSecondDataFeedId() public view virtual returns (bytes32);
