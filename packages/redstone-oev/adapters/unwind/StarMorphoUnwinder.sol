@@ -11,7 +11,7 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
     error NotMorpho();
     error NotBorrower();
-    error ReceiverNotSelf();
+    error ReceiverNotBorrower();
     error WrongTokens();
     error WrongMatcher();
     error SlicesNotCollateral();
@@ -20,7 +20,6 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
     error SlicesNotSigned();
     error SliceAlreadyUsed(uint256 index);
     error SliceNotSettled(uint256 index);
-    error UnexpectedProceeds(uint256 arrived, uint256 owed);
     IMorpho public immutable morpho;
     ISTAR public immutable star;
     address public immutable matcher;
@@ -45,7 +44,7 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
     ) external nonReentrant {
         address borrower = s.order.seller;
         if (msg.sender != borrower) revert NotBorrower();
-        if (s.order.receiver != address(this)) revert ReceiverNotSelf();
+        if (s.order.receiver != borrower) revert ReceiverNotBorrower();
         if (s.order.matcher != matcher) revert WrongMatcher();
         if (s.order.sellToken != mp.collateralToken || s.order.buyToken != mp.loanToken) revert WrongTokens();
         bytes32 digest = keccak256(abi.encode(block.chainid, address(this), s, slices));
@@ -56,17 +55,15 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
         bytes32 marketId = keccak256(abi.encode(mp));
         (, uint128 borrowShares, uint128 collateral) = morpho.position(marketId, borrower);
         uint256 total;
-        uint256 owed;
+        uint256 proceeds;
         for (uint256 i; i < slices.length; ++i) {
             total += slices[i].assignment.assignment.sellSlice;
-            owed += slices[i].assignment.assignment.buySlice;
+            proceeds += slices[i].assignment.assignment.buySlice;
         }
         if (total != collateral) revert SlicesNotCollateral();
         bytes memory data = abi.encode(mp, s, slices, uint256(collateral));
         IERC20 coll = IERC20(mp.collateralToken);
         uint256 collBefore = coll.balanceOf(borrower);
-        IERC20 loan = IERC20(mp.loanToken);
-        uint256 loanBefore = loan.balanceOf(address(this));
         uint256 repaid;
         if (borrowShares > 0) {
             (repaid,) = morpho.repay(mp, 0, borrowShares, borrower, data);
@@ -74,10 +71,6 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
             _release(mp, s, slices, collateral);
         }
         if (coll.balanceOf(borrower) != collBefore) revert CollateralNotSold();
-        uint256 arrived = loan.balanceOf(address(this)) + repaid - loanBefore;
-        if (arrived != owed) revert UnexpectedProceeds(arrived, owed);
-        uint256 proceeds = arrived - repaid;
-        loan.safeTransfer(borrower, proceeds);
         if (morpho.isAuthorized(borrower, address(this))) {
             try morpho.setAuthorizationWithSig(revoke, revokeSig) {} catch {}
         }
@@ -89,7 +82,9 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
         (MarketParams memory mp, ISTAR.SignedOrder memory s, FillSlice[] memory slices, uint256 collateral) =
             abi.decode(data, (MarketParams, ISTAR.SignedOrder, FillSlice[], uint256));
         _release(mp, s, slices, collateral);
-        IERC20(mp.loanToken).forceApprove(address(morpho), assets);
+        IERC20 loan = IERC20(mp.loanToken);
+        loan.safeTransferFrom(s.order.seller, address(this), assets);
+        loan.forceApprove(address(morpho), assets);
     }
 
     function _release(MarketParams memory mp, ISTAR.SignedOrder memory s, FillSlice[] memory slices, uint256 collateral)
