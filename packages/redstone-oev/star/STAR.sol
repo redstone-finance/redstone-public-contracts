@@ -292,7 +292,7 @@ contract STAR is Initializable, UUPSUpgradeable, EIP712Upgradeable, Ownable2Step
         if ($.filled[orderId] + a.sellSlice > o.sellAmount) revert Overfill();
         if (a.buySlice * o.sellAmount < o.buyAmount * a.sellSlice) revert BelowFloor();
         if (a.feeSlice * o.sellAmount < o.feeAmount * a.sellSlice) revert FeeShort();
-        _checkPrice(o);
+        _checkPrice(o, a);
         $.assignmentUsed[assignmentId] = true;
         $.filled[orderId] += a.sellSlice;
     }
@@ -312,9 +312,9 @@ contract STAR is Initializable, UUPSUpgradeable, EIP712Upgradeable, Ownable2Step
         feePaid = _pull(buy, collector, a.feeSlice);
         if (feePaid < a.feeSlice) revert FeeUnpaid();
     }
-    function _checkPrice(Order calldata o) private view {
-        uint256 sellValue = _value(o.sellToken, o.sellAmount);
-        uint256 buyValue = _value(o.buyToken, o.buyAmount);
+    function _checkPrice(Order calldata o, Assignment calldata a) private view {
+        uint256 sellValue = _value(o.sellToken, a.sellSlice);
+        uint256 buyValue = _value(o.buyToken, a.buySlice);
         if (buyValue * BPS < sellValue * (BPS - maxDiscountBps)) revert PriceTooLow();
     }
     function _value(address token, uint256 amount) private view returns (uint256) {
