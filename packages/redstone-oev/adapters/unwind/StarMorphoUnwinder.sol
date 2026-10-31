@@ -23,9 +23,7 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
     IMorpho public immutable morpho;
     ISTAR public immutable star;
     address public immutable matcher;
-    event Unwound(
-        bytes32 indexed marketId, address indexed borrower, uint256 collateral, uint256 repaid, uint256 proceeds
-    );
+    event Unwound(bytes32 indexed marketId, address indexed borrower, uint256 collateral, uint256 repaid);
     constructor(IMorpho _morpho, ISTAR _star, address _matcher) {
         morpho = _morpho;
         star = _star;
@@ -55,10 +53,8 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
         bytes32 marketId = keccak256(abi.encode(mp));
         (, uint128 borrowShares, uint128 collateral) = morpho.position(marketId, borrower);
         uint256 total;
-        uint256 proceeds;
         for (uint256 i; i < slices.length; ++i) {
             total += slices[i].assignment.assignment.sellSlice;
-            proceeds += slices[i].assignment.assignment.buySlice;
         }
         if (total != collateral) revert SlicesNotCollateral();
         bytes memory data = abi.encode(mp, s, slices, uint256(collateral));
@@ -74,7 +70,7 @@ contract StarMorphoUnwinder is ReentrancyGuardTransient {
         if (morpho.isAuthorized(borrower, address(this))) {
             try morpho.setAuthorizationWithSig(revoke, revokeSig) {} catch {}
         }
-        emit Unwound(marketId, borrower, collateral, repaid, proceeds);
+        emit Unwound(marketId, borrower, collateral, repaid);
     }
 
     function onMorphoRepay(uint256 assets, bytes calldata data) external {
