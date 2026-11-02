@@ -16,6 +16,8 @@ struct SettleNativeAtomicProviderStorageData {
     uint32 stableMaxAge;
     address morphoAdapterFactory;
     bool depegCheckDisabled;
+    mapping(address => bool) fillers;
+    mapping(address => uint256) accounted;
 }
 library SettleNativeAtomicProviderStorageV1 {
     // keccak256("RedStone.Oev.SettleNativeAtomicProvider.Storage.V1")
