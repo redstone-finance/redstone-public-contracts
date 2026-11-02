@@ -52,7 +52,6 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
     event Unpaused(address indexed account);
     event DepegCheckDisabledSet(bool disabled);
     event FillerSet(address indexed filler, bool allowed);
-    event AccountedSynced(address indexed rwa, uint256 accounted);
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(IERC4626 _vault) {
         vault = _vault;
@@ -224,11 +223,6 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
     function setFiller(address account, bool allowed) external onlyOwner {
         _getStorage().fillers[account] = allowed;
         emit FillerSet(account, allowed);
-    }
-    function syncAccounted(address rwa) external onlyOwner {
-        uint256 balance = IERC20(rwa).balanceOf(address(this));
-        _getStorage().accounted[rwa] = balance;
-        emit AccountedSynced(rwa, balance);
     }
     function setPauser(address account) external onlyOwner {
         _getStorage().pauser = account;
