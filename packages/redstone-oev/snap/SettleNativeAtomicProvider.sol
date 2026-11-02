@@ -148,13 +148,6 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
         uint256 ourPosition = IMorphoMarketAdapter(adapter).expectedSupplyAssets(marketId);
         return ourPosition < freeInMarket ? ourPosition : freeInMarket;
     }
-    function sell(address rwa, uint256 amountIn, uint256 minOut) external nonReentrant whenOpen returns (uint256 amountOut) {
-        IERC20 token = IERC20(rwa);
-        uint256 before = token.balanceOf(address(this));
-        token.safeTransferFrom(msg.sender, address(this), amountIn);
-        uint256 received = token.balanceOf(address(this)) - before;
-        amountOut = _sell(rwa, received, minOut);
-    }
     function sellReceived(address rwa, uint256 amountIn, uint256 minOut)
         external
         nonReentrant
@@ -163,8 +156,17 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
     {
         SettleNativeAtomicProviderStorageData storage $ = _getStorage();
         require($.fillers[msg.sender], "NOT_FILLER");
+        Asset storage a = $.assets[rwa];
+        require(a.priceFeed != address(0), "NOT_ACCEPTED");
         require(IERC20(rwa).balanceOf(address(this)) >= $.accounted[rwa] + amountIn, "NOT_RECEIVED");
-        amountOut = _sell(rwa, amountIn, minOut);
+        amountOut = _quote(rwa, a, amountIn);
+        require(amountOut >= minOut, "MIN_OUT");
+        require(amountOut > 0, "ZERO_OUT");
+        a.exposure += amountIn;
+        require(a.exposure <= a.maxExposure, "MAX_EXPOSURE");
+        $.accounted[rwa] += amountIn;
+        vault.withdraw(amountOut, msg.sender, address(this));
+        emit Sold(msg.sender, rwa, amountIn, amountOut);
     }
     function setAsset(address rwa, address priceFeed, uint16 discountBps, uint32 maxAge, uint256 maxExposure) external onlyOwner {
         require(priceFeed != address(0), "ZERO_FEED");
@@ -281,19 +283,6 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
         a.maxAge = maxAge;
         a.maxExposure = maxExposure;
         emit AssetSet(rwa, priceFeed, discountBps, maxAge, maxExposure);
-    }
-    function _sell(address rwa, uint256 received, uint256 minOut) private returns (uint256 amountOut) {
-        SettleNativeAtomicProviderStorageData storage $ = _getStorage();
-        Asset storage a = $.assets[rwa];
-        require(a.priceFeed != address(0), "NOT_ACCEPTED");
-        amountOut = _quote(rwa, a, received);
-        require(amountOut >= minOut, "MIN_OUT");
-        require(amountOut > 0, "ZERO_OUT");
-        a.exposure += received;
-        require(a.exposure <= a.maxExposure, "MAX_EXPOSURE");
-        $.accounted[rwa] += received;
-        vault.withdraw(amountOut, msg.sender, address(this));
-        emit Sold(msg.sender, rwa, received, amountOut);
     }
     function _fundVault(uint256 stableAmount) private {
         uint256 held = stable.balanceOf(address(this));
