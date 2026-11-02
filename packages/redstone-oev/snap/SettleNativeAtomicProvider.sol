@@ -51,6 +51,7 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
     event Paused(address indexed account);
     event Unpaused(address indexed account);
     event DepegCheckDisabledSet(bool disabled);
+    event FillerSet(address indexed filler, bool allowed);
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(IERC4626 _vault) {
         vault = _vault;
@@ -79,6 +80,12 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
     }
     function depegCheckDisabled() external view returns (bool) {
         return _getStorage().depegCheckDisabled;
+    }
+    function isFiller(address account) external view returns (bool) {
+        return _getStorage().fillers[account];
+    }
+    function accounted(address rwa) external view returns (uint256) {
+        return _getStorage().accounted[rwa];
     }
     function stableFeed() external view returns (address feed, uint16 maxDeviationBps, uint32 maxAge) {
         SettleNativeAtomicProviderStorageData storage $ = _getStorage();
@@ -140,20 +147,25 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
         uint256 ourPosition = IMorphoMarketAdapter(adapter).expectedSupplyAssets(marketId);
         return ourPosition < freeInMarket ? ourPosition : freeInMarket;
     }
-    function sell(address rwa, uint256 amountIn, uint256 minOut) external nonReentrant whenOpen returns (uint256 amountOut) {
-        Asset storage a = _getStorage().assets[rwa];
+    function sellReceived(address rwa, uint256 amountIn, uint256 minOut)
+        external
+        nonReentrant
+        whenOpen
+        returns (uint256 amountOut)
+    {
+        SettleNativeAtomicProviderStorageData storage $ = _getStorage();
+        require($.fillers[msg.sender], "NOT_FILLER");
+        Asset storage a = $.assets[rwa];
         require(a.priceFeed != address(0), "NOT_ACCEPTED");
-        IERC20 token = IERC20(rwa);
-        uint256 before = token.balanceOf(address(this));
-        token.safeTransferFrom(msg.sender, address(this), amountIn);
-        uint256 received = token.balanceOf(address(this)) - before;
-        amountOut = _quote(rwa, a, received);
+        require(IERC20(rwa).balanceOf(address(this)) >= $.accounted[rwa] + amountIn, "NOT_RECEIVED");
+        amountOut = _quote(rwa, a, amountIn);
         require(amountOut >= minOut, "MIN_OUT");
         require(amountOut > 0, "ZERO_OUT");
-        a.exposure += received;
+        a.exposure += amountIn;
         require(a.exposure <= a.maxExposure, "MAX_EXPOSURE");
+        $.accounted[rwa] += amountIn;
         vault.withdraw(amountOut, msg.sender, address(this));
-        emit Sold(msg.sender, rwa, received, amountOut);
+        emit Sold(msg.sender, rwa, amountIn, amountOut);
     }
     function setAsset(address rwa, address priceFeed, uint16 discountBps, uint32 maxAge, uint256 maxExposure) external onlyOwner {
         require(priceFeed != address(0), "ZERO_FEED");
@@ -208,6 +220,10 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
         _getStorage().morphoAdapterFactory = factory;
         emit MorphoAdapterFactorySet(factory);
     }
+    function setFiller(address account, bool allowed) external onlyOwner {
+        _getStorage().fillers[account] = allowed;
+        emit FillerSet(account, allowed);
+    }
     function setPauser(address account) external onlyOwner {
         _getStorage().pauser = account;
         emit PauserSet(account);
@@ -234,6 +250,9 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
     }
     function withdrawERC20(address token, address to, uint256 amount) external onlyOwner {
         IERC20(token).safeTransfer(to, amount);
+        mapping(address => uint256) storage accounted_ = _getStorage().accounted;
+        uint256 balance = IERC20(token).balanceOf(address(this));
+        if (accounted_[token] > balance) accounted_[token] = balance;
         emit Withdrawn(token, to, amount);
     }
     function renounceOwnership() public pure override {
