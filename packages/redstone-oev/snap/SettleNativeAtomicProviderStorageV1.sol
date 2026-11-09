@@ -6,6 +6,7 @@ struct Asset {
     uint32 maxAge;
     uint256 maxExposure;
     uint256 exposure;
+    uint256 maxPrice;
 }
 struct SettleNativeAtomicProviderStorageData {
     mapping(address => Asset) assets;
