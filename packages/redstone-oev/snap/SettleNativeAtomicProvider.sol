@@ -36,12 +36,15 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
     using SafeERC20 for IERC20;
     uint256 private constant BPS = 10_000;
     uint256 private constant MAX_DECIMALS = 18;
+    uint256 private constant RWA_UNITS = 1e18;
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     IERC4626 public immutable vault;
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     IERC20 public immutable stable;
     event Sold(address indexed seller, address indexed rwa, uint256 rwaReceived, uint256 stablePaid);
-    event AssetSet(address indexed rwa, address indexed priceFeed, uint16 discountBps, uint32 maxAge, uint256 maxExposure);
+    event AssetSet(
+        address indexed rwa, address indexed priceFeed, uint16 discountBps, uint32 maxAge, uint256 maxExposure, uint256 maxPrice
+    );
     event VaultFunded(uint256 stableAmount);
     event ExposureReduced(address indexed rwa, uint256 rwaRedeemed);
     event Withdrawn(address indexed token, address indexed to, uint256 amount);
@@ -153,41 +156,44 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
         whenOpen
         returns (uint256 amountOut)
     {
-        SettleNativeAtomicProviderStorageData storage $ = _getStorage();
-        require($.fillers[msg.sender], "NOT_FILLER");
-        Asset storage a = $.assets[rwa];
-        require(a.priceFeed != address(0), "NOT_ACCEPTED");
-        require(IERC20(rwa).balanceOf(address(this)) >= $.accounted[rwa] + amountIn, "NOT_RECEIVED");
-        amountOut = _quote(rwa, a, amountIn);
-        require(amountOut >= minOut, "MIN_OUT");
-        require(amountOut > 0, "ZERO_OUT");
-        a.exposure += amountIn;
-        require(a.exposure <= a.maxExposure, "MAX_EXPOSURE");
-        $.accounted[rwa] += amountIn;
-        vault.withdraw(amountOut, msg.sender, address(this));
-        emit Sold(msg.sender, rwa, amountIn, amountOut);
+        require(_getStorage().fillers[msg.sender], "NOT_FILLER");
+        return _sell(rwa, amountIn, minOut);
     }
-    function setAsset(address rwa, address priceFeed, uint16 discountBps, uint32 maxAge, uint256 maxExposure) external onlyOwner {
+    function setAsset(
+        address rwa,
+        address priceFeed,
+        uint16 discountBps,
+        uint32 maxAge,
+        uint256 maxExposure,
+        uint256 maxPrice
+    ) external onlyOwner {
         require(priceFeed != address(0), "ZERO_FEED");
         require(maxAge > 0, "ZERO_MAX_AGE");
-        _setAsset(rwa, priceFeed, discountBps, maxAge, maxExposure);
+        _requirePriceUnder(rwa, priceFeed, maxAge, maxPrice);
+        _setAsset(rwa, priceFeed, discountBps, maxAge, maxExposure, maxPrice);
     }
     function setDiscount(address rwa, uint16 discountBps) external onlyOwner {
         Asset storage a = _listedAsset(rwa);
-        _setAsset(rwa, a.priceFeed, discountBps, a.maxAge, a.maxExposure);
+        _setAsset(rwa, a.priceFeed, discountBps, a.maxAge, a.maxExposure, a.maxPrice);
     }
     function setMaxAge(address rwa, uint32 maxAge) external onlyOwner {
         require(maxAge > 0, "ZERO_MAX_AGE");
         Asset storage a = _listedAsset(rwa);
-        _setAsset(rwa, a.priceFeed, a.discountBps, maxAge, a.maxExposure);
+        if (maxAge > a.maxAge) _requireUsableFeed(a.priceFeed, maxAge);
+        _setAsset(rwa, a.priceFeed, a.discountBps, maxAge, a.maxExposure, a.maxPrice);
     }
     function setMaxExposure(address rwa, uint256 maxExposure) external onlyOwner {
         Asset storage a = _listedAsset(rwa);
-        _setAsset(rwa, a.priceFeed, a.discountBps, a.maxAge, maxExposure);
+        _setAsset(rwa, a.priceFeed, a.discountBps, a.maxAge, maxExposure, a.maxPrice);
+    }
+    function setMaxPrice(address rwa, uint256 maxPrice) external onlyOwner {
+        Asset storage a = _listedAsset(rwa);
+        if (maxPrice > a.maxPrice) _requirePriceUnder(rwa, a.priceFeed, a.maxAge, maxPrice);
+        _setAsset(rwa, a.priceFeed, a.discountBps, a.maxAge, a.maxExposure, maxPrice);
     }
     function removeAsset(address rwa) external onlyOwner {
         Asset storage a = _listedAsset(rwa);
-        _setAsset(rwa, address(0), a.discountBps, a.maxAge, a.maxExposure);
+        _setAsset(rwa, address(0), a.discountBps, a.maxAge, a.maxExposure, a.maxPrice);
     }
     function setStableFeed(address feed, uint16 maxDeviationBps, uint32 maxAge) external onlyOwner {
         if (feed == address(0)) {
@@ -269,14 +275,36 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
         a = _getStorage().assets[rwa];
         require(a.priceFeed != address(0), "NOT_ACCEPTED");
     }
-    function _setAsset(address rwa, address priceFeed, uint16 discountBps, uint32 maxAge, uint256 maxExposure) private {
+    function _setAsset(
+        address rwa,
+        address priceFeed,
+        uint16 discountBps,
+        uint32 maxAge,
+        uint256 maxExposure,
+        uint256 maxPrice
+    ) private {
         require(discountBps < BPS, "BAD_DISCOUNT");
         Asset storage a = _getStorage().assets[rwa];
         a.priceFeed = priceFeed;
         a.discountBps = discountBps;
         a.maxAge = maxAge;
         a.maxExposure = maxExposure;
-        emit AssetSet(rwa, priceFeed, discountBps, maxAge, maxExposure);
+        a.maxPrice = maxPrice;
+        emit AssetSet(rwa, priceFeed, discountBps, maxAge, maxExposure, maxPrice);
+    }
+    function _sell(address rwa, uint256 amountIn, uint256 minOut) internal returns (uint256 amountOut) {
+        SettleNativeAtomicProviderStorageData storage $ = _getStorage();
+        Asset storage a = $.assets[rwa];
+        require(a.priceFeed != address(0), "NOT_ACCEPTED");
+        require(IERC20(rwa).balanceOf(address(this)) >= $.accounted[rwa] + amountIn, "NOT_RECEIVED");
+        amountOut = _quote(rwa, a, amountIn);
+        require(amountOut >= minOut, "MIN_OUT");
+        require(amountOut > 0, "ZERO_OUT");
+        a.exposure += amountIn;
+        require(a.exposure <= a.maxExposure, "MAX_EXPOSURE");
+        $.accounted[rwa] += amountIn;
+        vault.withdraw(amountOut, msg.sender, address(this));
+        emit Sold(msg.sender, rwa, amountIn, amountOut);
     }
     function _fundVault(uint256 stableAmount) private {
         uint256 held = stable.balanceOf(address(this));
@@ -297,19 +325,36 @@ contract SettleNativeAtomicProvider is Initializable, UUPSUpgradeable, Ownable2S
         return (amountIn * numerator) / denominator;
     }
     function _exchangeRate(address rwa, Asset storage a) private view returns (uint256 numerator, uint256 denominator) {
-        (bool hasPrice, uint256 price) = _readPrice(a.priceFeed, a.maxAge);
-        if (!hasPrice) return (0, 0);
-        (bool hasFeedScale, uint256 feedScale) = _readScale(a.priceFeed);
+        (bool ok, uint256 value, uint256 units) = _value(rwa, a.priceFeed, a.maxAge);
+        if (!ok || _perRwaUnits(value, units) > a.maxPrice) return (0, 0);
+        numerator = value * (BPS - a.discountBps);
+        denominator = units * BPS;
+    }
+    function _value(address rwa, address feed, uint32 maxAge)
+        private
+        view
+        returns (bool ok, uint256 value, uint256 units)
+    {
+        (bool hasPrice, uint256 price) = _readPrice(feed, maxAge);
+        (bool hasFeedScale, uint256 feedScale) = _readScale(feed);
         (bool hasStableScale, uint256 stableScale) = _readScale(address(stable));
         (bool hasRwaScale, uint256 rwaScale) = _readScale(rwa);
-        if (!hasFeedScale || !hasStableScale || !hasRwaScale) return (0, 0);
-        numerator = price * stableScale * (BPS - a.discountBps);
-        denominator = feedScale * rwaScale * BPS;
+        if (!hasPrice || !hasFeedScale || !hasStableScale || !hasRwaScale) return (false, 0, 0);
+        return (true, price * stableScale, feedScale * rwaScale);
+    }
+    function _perRwaUnits(uint256 value, uint256 units) private pure returns (uint256) {
+        return (value * RWA_UNITS) / units;
     }
     function _requireUsableFeed(address feed, uint32 maxAge) private view {
         (bool hasPrice,) = _readPrice(feed, maxAge);
         (bool hasScale,) = _readScale(feed);
         require(hasPrice && hasScale, "FEED_UNREADABLE");
+    }
+    function _requirePriceUnder(address rwa, address feed, uint32 maxAge, uint256 maxPrice) private view {
+        _requireUsableFeed(feed, maxAge);
+        (bool ok, uint256 value, uint256 units) = _value(rwa, feed, maxAge);
+        require(ok, "RWA_UNREADABLE");
+        require(_perRwaUnits(value, units) <= maxPrice, "ABOVE_MAX_PRICE");
     }
     function _readPrice(address feed, uint32 maxAge) private view returns (bool ok, uint256 price) {
         (bool called, bytes memory data) = feed.staticcall(abi.encodeCall(IPriceFeed.latestRoundData, ()));
