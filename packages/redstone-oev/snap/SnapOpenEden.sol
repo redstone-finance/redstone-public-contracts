@@ -9,6 +9,7 @@ interface IOpenEdenVault {
 }
 struct SnapOpenEdenStorageData {
     mapping(address => uint256) queued;
+    mapping(address => uint256) minRedeem;
 }
 library SnapOpenEdenStorageV1 {
     // keccak256("RedStone.Oev.SnapOpenEden.Storage.V1")
@@ -23,6 +24,7 @@ contract SnapOpenEden is RedeemingSnap {
     event OpenEdenRedeemRequested(address indexed rwa, uint256 amount);
     event OpenEdenRedemptionBooked(address indexed rwa, uint256 redeemed, uint256 returned, uint256 stableDeposited);
     event OpenEdenQueuedLowered(address indexed rwa, uint256 amount);
+    event OpenEdenMinRedeemSet(address indexed rwa, uint256 amount);
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(IERC4626 _vault, address _redeemer, address _sanctionsList)
         RedeemingSnap(_vault, _redeemer, _sanctionsList)
@@ -30,8 +32,16 @@ contract SnapOpenEden is RedeemingSnap {
     function queued(address rwa) external view returns (uint256) {
         return _getOpenEdenStorage().queued[rwa];
     }
+    function minRedeem(address rwa) external view returns (uint256) {
+        return _getOpenEdenStorage().minRedeem[rwa];
+    }
+    function setMinRedeem(address rwa, uint256 amount) external onlyOwner {
+        _getOpenEdenStorage().minRedeem[rwa] = amount;
+        emit OpenEdenMinRedeemSet(rwa, amount);
+    }
     function redeemAtOpenEden(address rwa, uint256 amount) external onlyRedeemer nonReentrant {
         require(amount > 0, "ZERO_AMOUNT");
+        require(amount >= _getOpenEdenStorage().minRedeem[rwa], "BELOW_MIN_REDEEM");
         mapping(address => uint256) storage accounted_ = _getStorage().accounted;
         require(amount <= accounted_[rwa], "EXCEEDS_ACCOUNTED");
         IOpenEdenVault tbill = IOpenEdenVault(rwa);
