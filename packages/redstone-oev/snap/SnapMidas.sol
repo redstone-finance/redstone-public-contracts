@@ -108,12 +108,8 @@ contract SnapMidas is RedeemingSnap {
         mapping(uint256 => uint256) storage filed_ = _getMidasStorage().filed[rwa][redemptionVault];
         uint256 amount = filed_[requestId];
         require(amount > 0, "NOT_FILED");
-        (bool ok, bytes memory data) =
-            redemptionVault.staticcall(abi.encodeCall(IMidasRedemptionVault.redeemRequests, (requestId)));
-        if (ok && data.length >= 96) {
-            (,, uint256 status) = abi.decode(data, (uint256, uint256, uint256));
-            require(status != MIDAS_PROCESSED, "PROCESSED");
-        }
+        (,, uint8 status,,,) = IMidasRedemptionVault(redemptionVault).redeemRequests(requestId);
+        require(status != MIDAS_PROCESSED, "PROCESSED");
         delete filed_[requestId];
         _lowerExposure(rwa, amount);
     }
