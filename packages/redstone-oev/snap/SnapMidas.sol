@@ -40,7 +40,9 @@ contract SnapMidas is RedeemingSnap {
         address indexed rwa, address indexed redemptionVault, uint256 indexed requestId, uint256 amount
     );
     event MidasRedemptionBooked(address indexed rwa, uint256 indexed requestId, uint256 amount, uint256 stableDeposited);
-    event ReturnedAccounted(address indexed rwa, uint256 amount);
+    event ReturnedAccounted(
+        address indexed rwa, address indexed redemptionVault, uint256 indexed requestId, uint256 amount
+    );
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(IERC4626 _vault, address _redeemer, address _sanctionsList)
         RedeemingSnap(_vault, _redeemer, _sanctionsList)
@@ -88,6 +90,7 @@ contract SnapMidas is RedeemingSnap {
     function accountReturned(address rwa, address redemptionVault, uint256 requestId, uint256 amount)
         external
         onlyRedeemer
+        nonReentrant
     {
         mapping(uint256 => uint256) storage filed_ = _getMidasStorage().filed[rwa][redemptionVault];
         uint256 filedAmount = filed_[requestId];
@@ -99,12 +102,18 @@ contract SnapMidas is RedeemingSnap {
         require(IERC20(rwa).balanceOf(address(this)) >= accounted_[rwa] + amount, "NOT_RECEIVED");
         filed_[requestId] = filedAmount - amount;
         accounted_[rwa] += amount;
-        emit ReturnedAccounted(rwa, amount);
+        emit ReturnedAccounted(rwa, redemptionVault, requestId, amount);
     }
     function writeOff(address rwa, address redemptionVault, uint256 requestId) external onlyOwner {
         mapping(uint256 => uint256) storage filed_ = _getMidasStorage().filed[rwa][redemptionVault];
         uint256 amount = filed_[requestId];
         require(amount > 0, "NOT_FILED");
+        (bool ok, bytes memory data) =
+            redemptionVault.staticcall(abi.encodeCall(IMidasRedemptionVault.redeemRequests, (requestId)));
+        if (ok && data.length >= 96) {
+            (,, uint256 status) = abi.decode(data, (uint256, uint256, uint256));
+            require(status != MIDAS_PROCESSED, "PROCESSED");
+        }
         delete filed_[requestId];
         _lowerExposure(rwa, amount);
     }
