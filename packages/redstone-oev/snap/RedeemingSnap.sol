@@ -58,11 +58,9 @@ abstract contract RedeemingSnap is SettleNativeAtomicProvider {
         held = stable.balanceOf(address(this));
         if (held == 0) return 0;
         stable.forceApprove(address(vault), held);
-        uint256 gasBefore = gasleft();
         try vault.deposit(held, address(this)) {
             emit VaultFunded(held);
         } catch {
-            require(gasleft() > gasBefore / 63, "OUT_OF_GAS");
             stable.forceApprove(address(vault), 0);
             emit VaultDepositFailed(held);
             return 0;
