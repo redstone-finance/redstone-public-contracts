@@ -41,7 +41,9 @@ contract SnapOpenEden is RedeemingSnap {
     }
     function redeemAtOpenEden(address rwa, uint256 amount) external onlyRedeemer nonReentrant {
         require(amount > 0, "ZERO_AMOUNT");
-        require(amount >= _getOpenEdenStorage().minRedeem[rwa], "BELOW_MIN_REDEEM");
+        uint256 min = _getOpenEdenStorage().minRedeem[rwa];
+        require(min > 0, "NO_MIN_REDEEM");
+        require(amount >= min, "BELOW_MIN_REDEEM");
         mapping(address => uint256) storage accounted_ = _getStorage().accounted;
         require(amount <= accounted_[rwa], "EXCEEDS_ACCOUNTED");
         IOpenEdenVault tbill = IOpenEdenVault(rwa);
@@ -68,12 +70,13 @@ contract SnapOpenEden is RedeemingSnap {
         if (redeemed > 0) _lowerExposure(rwa, redeemed);
         emit OpenEdenRedemptionBooked(rwa, redeemed, returned, _depositHeld());
     }
-    function depositHeld() external onlyRedeemer nonReentrant {
-        require(_depositHeld() > 0, "NOTHING_HELD");
-    }
     function lowerQueued(address rwa, uint256 amount) external onlyOwner {
         SnapOpenEdenStorageData storage o = _getOpenEdenStorage();
         require(amount > 0 && amount <= o.queued[rwa], "EXCEEDS_QUEUED");
+        require(
+            _getStorage().assets[rwa].exposure + amount <= _getStorage().accounted[rwa] + o.queued[rwa],
+            "EXPOSURE_NOT_LOWERED"
+        );
         o.queued[rwa] -= amount;
         emit OpenEdenQueuedLowered(rwa, amount);
     }

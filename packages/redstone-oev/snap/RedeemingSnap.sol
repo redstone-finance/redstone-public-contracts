@@ -14,6 +14,7 @@ abstract contract RedeemingSnap is SettleNativeAtomicProvider {
     address public immutable redeemer;
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     address public immutable sanctionsList;
+    event VaultDepositFailed(uint256 stableAmount);
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(IERC4626 _vault, address _redeemer, address _sanctionsList) SettleNativeAtomicProvider(_vault) {
         redeemer = _redeemer;
@@ -46,12 +47,23 @@ abstract contract RedeemingSnap is SettleNativeAtomicProvider {
         a.exposure -= amount;
         emit ExposureReduced(rwa, amount);
     }
+    function depositHeld() external onlyRedeemer nonReentrant {
+        uint256 held = stable.balanceOf(address(this));
+        require(held > 0, "NOTHING_HELD");
+        stable.forceApprove(address(vault), held);
+        vault.deposit(held, address(this));
+        emit VaultFunded(held);
+    }
     function _depositHeld() internal returns (uint256 held) {
         held = stable.balanceOf(address(this));
-        if (held > 0) {
-            stable.forceApprove(address(vault), held);
-            vault.deposit(held, address(this));
+        if (held == 0) return 0;
+        stable.forceApprove(address(vault), held);
+        try vault.deposit(held, address(this)) {
             emit VaultFunded(held);
+        } catch {
+            stable.forceApprove(address(vault), 0);
+            emit VaultDepositFailed(held);
+            return 0;
         }
     }
 }
