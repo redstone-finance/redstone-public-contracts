@@ -71,4 +71,6 @@ amount off exposure by hand (`reduceExposure`, then `lowerQueued`).
 withdrawable liquidity on its own, so their sum can exceed what the vault can pay out at once.
 
 **Why it is accepted.** A sale the vault cannot pay reverts in `vault.withdraw`, and the seller
-keeps their tokens. Each SNAP pays only from its own shares.
+keeps their tokens. Each SNAP pays only from its own shares. The liquidity free in the vault's
+Morpho market is orders of magnitude larger than both SNAPs' shares together, so the double count
+matters only when that market is almost fully borrowed, and then neither SNAP could pay anyway.
