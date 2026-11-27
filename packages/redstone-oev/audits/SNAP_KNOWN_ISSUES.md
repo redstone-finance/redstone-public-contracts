@@ -7,7 +7,8 @@ Known behavior of the SNAP contracts in `../snap/` (`SettleNativeAtomicProvider`
 - SNAP OpenEden: `0x4e8e43608e0a07BC8335f768a02571314F76a734`
 
 Each item below is known and accepted, with the reason. A report of one of them is not a new
-finding. Findings marked Acknowledged in the audit reports in this folder are known too.
+finding. Findings marked Acknowledged or Mitigated in the audit reports in this folder are known
+too.
 
 ## REDS-1: Sanctions screening covers the caller, not the token's previous owner
 
