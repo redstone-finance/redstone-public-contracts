@@ -41,16 +41,7 @@ listed later could still sell through it.
 the owner, and they screen the seller themselves. No filler is enabled on mainnet. The owner
 disables one with `setFiller(filler, false)`.
 
-## REDS-4: Fillers and assets stay enabled until the owner removes them
-
-**Issue.** An upgrade keeps the proxy's storage, including the fillers and the listed assets. A
-filler or an asset left out of a new configuration stays active until the owner calls
-`setFiller(filler, false)` or `removeAsset(rwa)`.
-
-**Why it is accepted.** Removing either is an explicit owner operation by design. The owner is a
-Safe, and its operations are trusted.
-
-## REDS-5: A booking deposits all the stable SNAP holds
+## REDS-4: A booking deposits all the stable SNAP holds
 
 **Issue.** `bookMidasRedemption` and `bookOpenEdenRedemption` deposit SNAP's whole stable balance
 into the vault, not the proceeds of one request. If several requests were paid before a booking,
@@ -61,7 +52,7 @@ own request's amount. The event's amount is what was deposited, not one request'
 pays a request in the same transaction that marks it Processed, so a Processed request is a paid
 one.
 
-## REDS-6: Someone else's OpenEden request naming SNAP as the receiver delays booking
+## REDS-5: Someone else's OpenEden request naming SNAP as the receiver delays booking
 
 **Issue.** OpenEden reports the shares queued per receiver, not per request. A KYC'd TBILL holder
 can file a redemption with SNAP as the receiver. While it is queued, `bookOpenEdenRedemption`
@@ -73,7 +64,7 @@ the stable goes to SNAP; when it cancels it, the shares go back to the holder. O
 leaves the queue, the next booking catches up. Nothing is lost, and the owner can also take the
 amount off exposure by hand (`reduceExposure`, then `lowerQueued`).
 
-## REDS-7: Two SNAPs on one vault count the same liquidity
+## REDS-6: Two SNAPs on one vault count the same liquidity
 
 **Issue.** Both SNAPs hold shares of the same Morpho Vault V2
 (`0x8c106EEDAd96553e64287A5A6839c3Cc78afA3D0`). Each one's `maxAmountIn` counts the vault's
